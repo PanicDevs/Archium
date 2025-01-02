@@ -21,4 +21,4 @@ class ModuleInstallationReport extends Component
     {
         return view('archium::livewire.pages.module-installation-report')->layout('archium::layouts.app');
     }
-} 
+}
