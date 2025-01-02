@@ -67,23 +67,6 @@ trait HandlesRepositoryOperations
      */
     private function cleanupModule(string $modulePath, string $moduleKey): void
     {
-        // Remove from modules_statuses.json
-        $statusesFile = base_path('modules_statuses.json');
-        if (File::exists($statusesFile)) {
-            $statuses = json_decode(File::get($statusesFile), true) ?? [];
-            unset($statuses[$moduleKey]);
-            File::put($statusesFile, json_encode($statuses, JSON_PRETTY_PRINT));
-        }
-
-        // Clean bootstrap cache
-        $cacheFiles = ['modules.php', 'packages.php', 'services.php'];
-        foreach ($cacheFiles as $file) {
-            $cachePath = base_path('bootstrap/cache/' . $file);
-            if (File::exists($cachePath)) {
-                File::delete($cachePath);
-            }
-        }
-
         // Remove module directory if exists
         if (File::exists($modulePath)) {
             File::deleteDirectory($modulePath);

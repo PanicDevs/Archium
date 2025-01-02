@@ -52,6 +52,7 @@ trait HandlesInstallationSteps
         $this->initializeDependencyCheckStep();
         $this->initializeVersionCheckStep();
         $this->initializeDependencySteps();
+        $this->initializePrepareInstallationStep();
         $this->initializeRepositoryCloneStep();
         if (method_exists($this, 'initializeDependencyCloneSteps')) {
             $this->initializeDependencyCloneSteps();
@@ -253,13 +254,18 @@ trait HandlesInstallationSteps
     {
         $this->steps['finalize'] = [
             'title' => 'Finalize Installation',
-            'description' => 'Completing module installation',
+            'description' => 'Complete the installation process.',
             'status' => 'pending',
-            'confirm_message' => 'This will finalize the module installation.',
             'sub_steps' => [
                 [
+                    'key' => 'restore-module-states',
+                    'title' => 'Restore Module States',
+                    'description' => 'Restore original module states.',
+                    'status' => 'pending'
+                ],
+                [
                     'key' => 'enable-modules',
-                    'title' => 'Enable modules',
+                    'title' => 'Enable Modules',
                     'description' => 'Enable the main module and its dependencies.',
                     'status' => 'pending'
                 ],
@@ -273,6 +279,38 @@ trait HandlesInstallationSteps
                     'key' => 'generate-report',
                     'title' => 'Generate installation report',
                     'description' => 'Create a summary of all installation steps and their outcomes.',
+                    'status' => 'pending'
+                ]
+            ]
+        ];
+    }
+
+    /**
+     * Initialize the prepare-installation step
+     */
+    private function initializePrepareInstallationStep(): void
+    {
+        $this->steps['prepare-installation'] = [
+            'title' => 'Prepare Installation',
+            'description' => 'Prepare system for installation by storing and clearing module states.',
+            'status' => 'pending',
+            'sub_steps' => [
+                [
+                    'key' => 'store-states',
+                    'title' => 'Store Module States',
+                    'description' => 'Store current module states for later restoration.',
+                    'status' => 'pending'
+                ],
+                [
+                    'key' => 'clear-states',
+                    'title' => 'Clear Module States',
+                    'description' => 'Clear all module states for clean installation.',
+                    'status' => 'pending'
+                ],
+                [
+                    'key' => 'clear-cache',
+                    'title' => 'Clear Cache',
+                    'description' => 'Clear system caches for clean installation.',
                     'status' => 'pending'
                 ]
             ]

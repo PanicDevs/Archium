@@ -24,83 +24,26 @@ trait HandlesStepExecution
     protected array $originalModuleStates = [];
 
     /**
-     * Prepare system for installation by storing module states and cleaning cache
+     * Clear system caches and prepare for installation
      */
-    protected function prepareSystemForInstallation(): void
+    protected function clearSystemCaches(): void
     {
-        \Log::info("Starting system preparation for installation");
+        \Log::info("Clearing system caches");
         
         try {
-            // Store current module states from modules_statuses.json
-            $modulesStatusFile = base_path('modules_statuses.json');
-            if (File::exists($modulesStatusFile)) {
-                $this->originalModuleStates = json_decode(File::get($modulesStatusFile), true);
-                \Log::info("Read original states from modules_statuses.json", [
-                    'states' => $this->originalModuleStates
-                ]);
-            }
-
-            // Get current modules list from modules directory
-            $modulesPath = config('archium.modules_directory');
-            $modulesList = [];
-            if (File::exists($modulesPath)) {
-                foreach (File::directories($modulesPath) as $moduleDir) {
-                    $moduleName = basename($moduleDir);
-                    if (File::exists($moduleDir . '/module.json')) {
-                        $modulesList[$moduleName] = true;
-                    }
-                }
-            }
+            // Clear bootstrap cache files
+            $cacheFiles = [
+                'modules.php',
+                'packages.php',
+                'services.php',
+                'config.php'
+            ];
             
-            \Log::info("Current modules list before installation", [
-                'modules' => $modulesList
-            ]);
-
-            // Force disable all modules found in either source
-            $allModules = array_unique(
-                array_merge(
-                    array_keys($modulesList), 
-                    array_keys($this->originalModuleStates)
-                )
-            );
-
-            foreach ($allModules as $name) {
-                \Log::info("Attempting to disable module", ['module' => $name]);
-                
-                try {
-                    \Artisan::call('module:disable', ['module' => $name]);
-                    \Log::info("Module disable command output", [
-                        'module' => $name,
-                        'output' => \Artisan::output()
-                    ]);
-                } catch (\Exception $e) {
-                    \Log::warning("Failed to disable module but continuing", [
-                        'module' => $name,
-                        'error' => $e->getMessage()
-                    ]);
-                }
-            }
-
-            // Verify modules are disabled by checking modules_statuses.json
-            if (File::exists($modulesStatusFile)) {
-                $currentStates = json_decode(File::get($modulesStatusFile), true);
-                \Log::info("Current module states after disabling", [
-                    'states' => $currentStates
-                ]);
-
-                // If any module is still enabled, try to force disable it again
-                foreach ($currentStates as $name => $enabled) {
-                    if ($enabled === true) {
-                        \Log::warning("Module still enabled, trying to force disable", ['module' => $name]);
-                        try {
-                            \Artisan::call('module:disable', ['module' => $name]);
-                        } catch (\Exception $e) {
-                            \Log::error("Failed to force disable module", [
-                                'module' => $name,
-                                'error' => $e->getMessage()
-                            ]);
-                        }
-                    }
+            foreach ($cacheFiles as $file) {
+                $cachePath = base_path('bootstrap/cache/' . $file);
+                if (File::exists($cachePath)) {
+                    File::delete($cachePath);
+                    \Log::info("Deleted cache file", ['file' => $file]);
                 }
             }
 
@@ -127,15 +70,27 @@ trait HandlesStepExecution
                     ]);
                 }
             }
+        } catch (\Exception $e) {
+            \Log::error("Error during cache clearing", [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            throw $e;
+        }
+    }
 
-            // Final verification by reading modules_statuses.json
-            if (File::exists($modulesStatusFile)) {
-                $finalStates = json_decode(File::get($modulesStatusFile), true);
-                \Log::info("Final module states after preparation", [
-                    'states' => $finalStates
-                ]);
+    /**
+     * Prepare system for installation by storing module states and cleaning cache
+     */
+    protected function prepareSystemForInstallation(): void
+    {
+        \Log::info("Starting system preparation for installation");
+        
+        try {
+            // Only clear caches when called outside of prepare-installation step
+            if ($this->currentStep !== 'prepare-installation') {
+                $this->clearSystemCaches();
             }
-
         } catch (\Exception $e) {
             \Log::error("Error during system preparation", [
                 'error' => $e->getMessage(),
@@ -150,8 +105,8 @@ trait HandlesStepExecution
      */
     public function executeStep(string $step): void
     {
-        // Initialize system before clone step or dependency clone steps
-        if ($step === 'clone-repository' || preg_match('/^clone-dependency-(.+)$/', $step)) {
+        // Initialize system only during prepare-installation step
+        if ($step === 'prepare-installation') {
             $this->prepareSystemForInstallation();
         }
 
@@ -259,6 +214,9 @@ trait HandlesStepExecution
                 case (preg_match('/^check-dependency-(.+)$/', $step, $matches) ? true : false):
                     $this->checkDependencySubStep($matches[1], $subStep);
                     break;
+                case 'prepare-installation':
+                    $this->prepareInstallationSubStep($subStep);
+                    break;
                 case 'clone-repository':
                     $this->cloneRepositorySubStep($subStep);
                     break;
@@ -294,6 +252,48 @@ trait HandlesStepExecution
             // Set error state on the main step
             $this->steps[$step]['status'] = 'failed';
             throw $e; // Re-throw to stop the process
+        }
+    }
+
+    /**
+     * Handle prepare-installation sub-steps
+     */
+    private function prepareInstallationSubStep(string $subStep): void
+    {
+        try {
+            $modulesStatusFile = base_path('modules_statuses.json');
+            
+            switch ($subStep) {
+                case 'store-states':
+                    // Store current module states from modules_statuses.json
+                    if (File::exists($modulesStatusFile)) {
+                        $states = json_decode(File::get($modulesStatusFile), true) ?? [];
+                        session(['original_module_states' => $states]);
+                        \Log::info("Stored original module states", [
+                            'states' => $states
+                        ]);
+                    }
+                    $this->updateSubStep('prepare-installation', 'store-states', 'completed', 'Original module states stored successfully');
+                    break;
+
+                case 'clear-states':
+                    // Replace with empty states (all modules disabled)
+                    File::put($modulesStatusFile, json_encode((object)[], JSON_PRETTY_PRINT));
+                    \Log::info("Cleared all module states");
+                    $this->updateSubStep('prepare-installation', 'clear-states', 'completed', 'Module states cleared successfully');
+                    break;
+
+                case 'clear-cache':
+                    $this->clearSystemCaches();
+                    $this->updateSubStep('prepare-installation', 'clear-cache', 'completed', 'System caches cleared successfully');
+                    break;
+
+                default:
+                    throw new \Exception("Unknown prepare-installation sub-step: {$subStep}");
+            }
+        } catch (\Exception $e) {
+            $this->updateSubStep('prepare-installation', $subStep, 'failed', null, $e->getMessage());
+            throw $e;
         }
     }
 
@@ -431,73 +431,36 @@ trait HandlesStepExecution
     private function finalizeSubStep(string $subStep): void
     {
         try {
+            $modulesStatusFile = base_path('modules_statuses.json');
+            
             switch ($subStep) {
+                case 'restore-module-states':
+                    $originalStates = session('original_module_states', []);
+                    \Log::info("Starting module states restoration", [
+                        'original_states' => $originalStates
+                    ]);
+
+                    if (!empty($originalStates)) {
+                        File::put($modulesStatusFile, json_encode($originalStates, JSON_PRETTY_PRINT));
+                        \Log::info("Restored original module states", [
+                            'states' => $originalStates
+                        ]);
+                    } else {
+                        \Log::warning("No original module states to restore");
+                    }
+
+                    $this->updateSubStep(
+                        'finalize',
+                        'restore-module-states',
+                        'completed',
+                        'Original module states restored successfully'
+                    );
+                    break;
+
                 case 'enable-modules':
                     \Log::info("Starting enable-modules finalization step", [
-                        'skip_installation' => $this->moduleData['skip_installation'] ?? false,
-                        'original_states' => $this->originalModuleStates
+                        'skip_installation' => $this->moduleData['skip_installation'] ?? false
                     ]);
-
-                    // Check if any changes were made (main module or dependencies)
-                    $hasChanges = false;
-                    
-                    // Check main module
-                    if (!isset($this->moduleData['skip_installation']) || !$this->moduleData['skip_installation']) {
-                        $hasChanges = true;
-                    }
-                    
-                    // Check dependencies
-                    if (!empty($this->moduleData['dependencies'])) {
-                        foreach ($this->moduleData['dependencies'] as $dependency => $data) {
-                            if (is_array($data) && (!isset($data['skip_installation']) || !$data['skip_installation'])) {
-                                $hasChanges = true;
-                                break;
-                            }
-                        }
-                    }
-
-                    \Log::info("Installation changes check", [
-                        'has_changes' => $hasChanges,
-                        'main_module_skipped' => $this->moduleData['skip_installation'] ?? false,
-                        'dependencies' => $this->moduleData['dependencies'] ?? []
-                    ]);
-
-                    // Skip enabling modules if no changes were made
-                    if (!$hasChanges) {
-                        \Log::info("Skipping module enabling - No changes were made");
-                        $this->updateSubStep(
-                            'finalize',
-                            'enable-modules',
-                            'completed',
-                            'Module enabling skipped - No changes were made'
-                        );
-                        break;
-                    }
-
-                    // First restore original module states
-                    foreach ($this->originalModuleStates as $moduleName => $wasEnabled) {
-                        \Log::info("Processing original module state restoration", [
-                            'module' => $moduleName,
-                            'was_enabled' => $wasEnabled
-                        ]);
-                        
-                        if ($wasEnabled) {
-                            \Artisan::call('module:enable', ['module' => $moduleName]);
-                            \Log::info('Module enable command output for restoration', [
-                                'module' => $moduleName,
-                                'output' => \Artisan::output()
-                            ]);
-                        }
-                    }
-
-                    // Verify current state after restoration
-                    $modulesStatusFile = base_path('modules_statuses.json');
-                    if (File::exists($modulesStatusFile)) {
-                        $currentStates = json_decode(File::get($modulesStatusFile), true);
-                        \Log::info("Module states after restoring original states", [
-                            'states' => $currentStates
-                        ]);
-                    }
 
                     // Then enable the main module if it's new
                     $moduleDirectory = $this->moduleData['directory'];
@@ -662,23 +625,29 @@ trait HandlesStepExecution
                             $report['dependencies'][$dependencyKey] = [
                                 'directory' => $dependencyData['directory'],
                                 'version' => $this->moduleData['dependencies'][$dependencyKey]['version'] ?? $dependencyData['version'] ?? 'unknown',
+                                'local_version' => $this->moduleData['dependencies'][$dependencyKey]['local_version'] ?? 'unknown',
+                                'remote_version' => $this->moduleData['dependencies'][$dependencyKey]['remote_version'] ?? $dependencyData['version'] ?? 'unknown',
                                 'repository' => $dependencyData['repository'] ?? 'unknown',
                                 'branch' => $dependencyData['branch'] ?? 'unknown',
                                 'skipped' => isset($this->moduleData['dependencies'][$dependencyKey]['skip_installation']) && 
-                                           $this->moduleData['dependencies'][$dependencyKey]['skip_installation']
+                                           $this->moduleData['dependencies'][$dependencyKey]['skip_installation'],
+                                'fresh_install' => isset($this->moduleData['dependencies'][$dependencyKey]['needs_fresh_install']) &&
+                                                 $this->moduleData['dependencies'][$dependencyKey]['needs_fresh_install']
                             ];
                         }
                     }
 
                     // Add timeline from installation report
                     $report['timeline'] = array_map(function($entry) {
+                        $timestamp = $entry['timestamp'];
                         return [
                             'step' => $entry['step'],
                             'sub_step' => $entry['sub_step'] ?? null,
                             'status' => $entry['status'],
                             'message' => $entry['message'] ?? null,
                             'error' => $entry['error'] ?? null,
-                            'timestamp' => $entry['timestamp']
+                            'timestamp' => $timestamp,
+                            'relative_time' => $timestamp->diffForHumans()
                         ];
                     }, $this->installationReport);
 
