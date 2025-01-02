@@ -457,11 +457,8 @@ trait HandlesStepExecution
 
                     // Store the report in session for viewing
                     session(['installation_report' => $report]);
-
-                    \Log::info('Dispatching installation report', ['report' => $report]);
                     
-                    // Emit event to show the report modal
-                    $this->dispatch('show-installation-report', ['report' => $report]);
+                    $this->reportReady = true;
 
                     $this->updateSubStep(
                         'finalize',

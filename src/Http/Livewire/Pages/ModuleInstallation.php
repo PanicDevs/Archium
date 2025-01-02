@@ -26,6 +26,8 @@ class ModuleInstallation extends Component
     use HandlesDependencies;
     use HandlesRepositoryOperations;
 
+    public $reportReady = false;
+
     /**
      * Initialize the component with the module key
      */

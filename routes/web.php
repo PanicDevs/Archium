@@ -9,5 +9,6 @@ Route::group([
 ], function () {
     Route::get('/', \PanicDev\Archium\Http\Livewire\Pages\Dashboard::class)->name('dashboard');
     Route::get('/modules', \PanicDev\Archium\Http\Livewire\Pages\Modules::class)->name('modules');
+    Route::get('/modules/i/report', \PanicDev\Archium\Http\Livewire\Pages\ModuleInstallationReport::class)->name('modules.installation.report');
     Route::get('/modules/i/{module}', \PanicDev\Archium\Http\Livewire\Pages\ModuleInstallation::class)->name('modules.install');
 }); 
