@@ -8,7 +8,7 @@
             <div class="lg:col-span-2">
                 @include('archium::livewire.pages.module-installation.partials.steps-timeline')
 
-                @if(!$reportReady)
+                @if($reportReady)
                     <div class="mt-6 bg-white dark:bg-gray-900 shadow-sm rounded-lg p-6">
                         <div class="flex items-start justify-between gap-2">
                             <div>
@@ -17,7 +17,7 @@
                                     View the detailed installation report including module information, dependencies, and timeline.
                                 </p>
                             </div>
-                            <a href="{{ route('archium.modules.installation.report') }}" 
+                            <a href="{{ route('archium.modules.installation.report') }}"
                                target="_blank"
                                class="inline-flex min-w-max items-center px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-500 dark:bg-primary-500 dark:hover:bg-primary-400 rounded transition-colors duration-200">
                                 <svg class="w-5 h-5 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -34,4 +34,4 @@
             </div>
         </div>
     </div>
-</div> 
+</div>
