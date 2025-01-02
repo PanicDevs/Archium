@@ -19,10 +19,142 @@ trait HandlesStepExecution
     public array $installationReport = [];
 
     /**
+     * Store original module states before installation
+     */
+    protected array $originalModuleStates = [];
+
+    /**
+     * Prepare system for installation by storing module states and cleaning cache
+     */
+    protected function prepareSystemForInstallation(): void
+    {
+        \Log::info("Starting system preparation for installation");
+        
+        try {
+            // Store current module states from modules_statuses.json
+            $modulesStatusFile = base_path('modules_statuses.json');
+            if (File::exists($modulesStatusFile)) {
+                $this->originalModuleStates = json_decode(File::get($modulesStatusFile), true);
+                \Log::info("Read original states from modules_statuses.json", [
+                    'states' => $this->originalModuleStates
+                ]);
+            }
+
+            // Get current modules list from modules directory
+            $modulesPath = config('archium.modules_directory');
+            $modulesList = [];
+            if (File::exists($modulesPath)) {
+                foreach (File::directories($modulesPath) as $moduleDir) {
+                    $moduleName = basename($moduleDir);
+                    if (File::exists($moduleDir . '/module.json')) {
+                        $modulesList[$moduleName] = true;
+                    }
+                }
+            }
+            
+            \Log::info("Current modules list before installation", [
+                'modules' => $modulesList
+            ]);
+
+            // Force disable all modules found in either source
+            $allModules = array_unique(
+                array_merge(
+                    array_keys($modulesList), 
+                    array_keys($this->originalModuleStates)
+                )
+            );
+
+            foreach ($allModules as $name) {
+                \Log::info("Attempting to disable module", ['module' => $name]);
+                
+                try {
+                    \Artisan::call('module:disable', ['module' => $name]);
+                    \Log::info("Module disable command output", [
+                        'module' => $name,
+                        'output' => \Artisan::output()
+                    ]);
+                } catch (\Exception $e) {
+                    \Log::warning("Failed to disable module but continuing", [
+                        'module' => $name,
+                        'error' => $e->getMessage()
+                    ]);
+                }
+            }
+
+            // Verify modules are disabled by checking modules_statuses.json
+            if (File::exists($modulesStatusFile)) {
+                $currentStates = json_decode(File::get($modulesStatusFile), true);
+                \Log::info("Current module states after disabling", [
+                    'states' => $currentStates
+                ]);
+
+                // If any module is still enabled, try to force disable it again
+                foreach ($currentStates as $name => $enabled) {
+                    if ($enabled === true) {
+                        \Log::warning("Module still enabled, trying to force disable", ['module' => $name]);
+                        try {
+                            \Artisan::call('module:disable', ['module' => $name]);
+                        } catch (\Exception $e) {
+                            \Log::error("Failed to force disable module", [
+                                'module' => $name,
+                                'error' => $e->getMessage()
+                            ]);
+                        }
+                    }
+                }
+            }
+
+            // Aggressively clear all caches
+            $commands = [
+                'optimize:clear',
+                'cache:clear',
+                'config:clear',
+                'route:clear',
+                'view:clear'
+            ];
+
+            foreach ($commands as $command) {
+                try {
+                    \Artisan::call($command);
+                    \Log::info("Cache clear command output", [
+                        'command' => $command,
+                        'output' => \Artisan::output()
+                    ]);
+                } catch (\Exception $e) {
+                    \Log::warning("Cache clear command failed but continuing", [
+                        'command' => $command,
+                        'error' => $e->getMessage()
+                    ]);
+                }
+            }
+
+            // Final verification by reading modules_statuses.json
+            if (File::exists($modulesStatusFile)) {
+                $finalStates = json_decode(File::get($modulesStatusFile), true);
+                \Log::info("Final module states after preparation", [
+                    'states' => $finalStates
+                ]);
+            }
+
+        } catch (\Exception $e) {
+            \Log::error("Error during system preparation", [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            throw $e;
+        }
+    }
+
+    /**
      * Execute a main installation step
      */
     public function executeStep(string $step): void
     {
+        // Initialize system before clone step or dependency clone steps
+        if ($step === 'clone-repository' || preg_match('/^clone-dependency-(.+)$/', $step)) {
+            $this->prepareSystemForInstallation();
+        }
+
         // Check if this step should be skipped
         if (method_exists($this, 'shouldSkipStep') && $this->shouldSkipStep($step)) {
             $this->markStepAsSkipped($step);
@@ -301,8 +433,38 @@ trait HandlesStepExecution
         try {
             switch ($subStep) {
                 case 'enable-modules':
-                    // Skip enabling modules if installation was skipped
-                    if (isset($this->moduleData['skip_installation']) && $this->moduleData['skip_installation']) {
+                    \Log::info("Starting enable-modules finalization step", [
+                        'skip_installation' => $this->moduleData['skip_installation'] ?? false,
+                        'original_states' => $this->originalModuleStates
+                    ]);
+
+                    // Check if any changes were made (main module or dependencies)
+                    $hasChanges = false;
+                    
+                    // Check main module
+                    if (!isset($this->moduleData['skip_installation']) || !$this->moduleData['skip_installation']) {
+                        $hasChanges = true;
+                    }
+                    
+                    // Check dependencies
+                    if (!empty($this->moduleData['dependencies'])) {
+                        foreach ($this->moduleData['dependencies'] as $dependency => $data) {
+                            if (is_array($data) && (!isset($data['skip_installation']) || !$data['skip_installation'])) {
+                                $hasChanges = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    \Log::info("Installation changes check", [
+                        'has_changes' => $hasChanges,
+                        'main_module_skipped' => $this->moduleData['skip_installation'] ?? false,
+                        'dependencies' => $this->moduleData['dependencies'] ?? []
+                    ]);
+
+                    // Skip enabling modules if no changes were made
+                    if (!$hasChanges) {
+                        \Log::info("Skipping module enabling - No changes were made");
                         $this->updateSubStep(
                             'finalize',
                             'enable-modules',
@@ -312,42 +474,125 @@ trait HandlesStepExecution
                         break;
                     }
 
-                    // Enable the main module first using directory name
-                    $moduleDirectory = $this->moduleData['directory'];
-                    \Artisan::call('module:enable', ['module' => $moduleDirectory]);
-                    $output = \Artisan::output();
-                    \Log::info('Main module enable command output', [
-                        'module' => $moduleDirectory,
-                        'output' => $output
-                    ]);
+                    // First restore original module states
+                    foreach ($this->originalModuleStates as $moduleName => $wasEnabled) {
+                        \Log::info("Processing original module state restoration", [
+                            'module' => $moduleName,
+                            'was_enabled' => $wasEnabled
+                        ]);
+                        
+                        if ($wasEnabled) {
+                            \Artisan::call('module:enable', ['module' => $moduleName]);
+                            \Log::info('Module enable command output for restoration', [
+                                'module' => $moduleName,
+                                'output' => \Artisan::output()
+                            ]);
+                        }
+                    }
 
-                    // Then enable all dependencies that were installed
+                    // Verify current state after restoration
+                    $modulesStatusFile = base_path('modules_statuses.json');
+                    if (File::exists($modulesStatusFile)) {
+                        $currentStates = json_decode(File::get($modulesStatusFile), true);
+                        \Log::info("Module states after restoring original states", [
+                            'states' => $currentStates
+                        ]);
+                    }
+
+                    // Then enable the main module if it's new
+                    $moduleDirectory = $this->moduleData['directory'];
+                    \Log::info("Checking main module installation", [
+                        'module_directory' => $moduleDirectory,
+                        'exists_in_original' => isset($this->originalModuleStates[$moduleDirectory])
+                    ]);
+                    
+                    if (!isset($this->originalModuleStates[$moduleDirectory])) {
+                        \Log::info("Enabling new main module", ['module' => $moduleDirectory]);
+                        \Artisan::call('module:enable', ['module' => $moduleDirectory]);
+                        \Log::info('Main module enable command output', [
+                            'module' => $moduleDirectory,
+                            'output' => \Artisan::output()
+                        ]);
+                    }
+
+                    // Then enable any new dependencies that were installed
                     if (!empty($this->moduleData['dependencies'])) {
+                        \Log::info("Processing dependencies for enabling", [
+                            'dependencies' => $this->moduleData['dependencies']
+                        ]);
+                        
                         foreach ($this->moduleData['dependencies'] as $dependency => $data) {
+                            \Log::info("Processing dependency", [
+                                'dependency' => $dependency,
+                                'data' => $data
+                            ]);
+                            
                             if (is_array($data) && (!isset($data['skip_installation']) || !$data['skip_installation'])) {
-                                // Get dependency data from XML
                                 $dependencyData = $this->getModuleData($dependency);
-                                \Artisan::call('module:enable', ['module' => $dependencyData['directory']]);
-                                $output = \Artisan::output();
-                                \Log::info('Dependency enable command output', [
-                                    'dependency' => $dependencyData['directory'],
-                                    'output' => $output
+                                $depDirectory = $dependencyData['directory'];
+                                
+                                \Log::info("Checking dependency installation", [
+                                    'dependency' => $dependency,
+                                    'directory' => $depDirectory,
+                                    'exists_in_original' => isset($this->originalModuleStates[$depDirectory])
                                 ]);
+                                
+                                // Only enable if it's a new module
+                                if (!isset($this->originalModuleStates[$depDirectory])) {
+                                    \Log::info("Enabling new dependency", ['dependency' => $depDirectory]);
+                                    \Artisan::call('module:enable', ['module' => $depDirectory]);
+                                    \Log::info('Dependency enable command output', [
+                                        'dependency' => $depDirectory,
+                                        'output' => \Artisan::output()
+                                    ]);
+                                }
                             }
                         }
                     }
+
+                    // Final state verification
+                    if (File::exists($modulesStatusFile)) {
+                        $finalStates = json_decode(File::get($modulesStatusFile), true);
+                        \Log::info("Final module states after all operations", [
+                            'states' => $finalStates
+                        ]);
+                    }
+
+                    // Clear bootstrap cache again after enabling modules
+                    \Artisan::call('optimize:clear');
+                    \Log::info("Cleared bootstrap cache after enabling modules", [
+                        'output' => \Artisan::output()
+                    ]);
 
                     $this->updateSubStep(
                         'finalize',
                         'enable-modules',
                         'completed',
-                        'All modules have been enabled successfully'
+                        'All modules have been restored and new modules enabled successfully'
                     );
                     break;
 
                 case 'verify-installation':
-                    // Skip verification if installation was skipped
-                    if (isset($this->moduleData['skip_installation']) && $this->moduleData['skip_installation']) {
+                    // Check if any changes were made (main module or dependencies)
+                    $hasChanges = false;
+                    
+                    // Check main module
+                    if (!isset($this->moduleData['skip_installation']) || !$this->moduleData['skip_installation']) {
+                        $hasChanges = true;
+                    }
+                    
+                    // Check dependencies
+                    if (!empty($this->moduleData['dependencies'])) {
+                        foreach ($this->moduleData['dependencies'] as $dependency => $data) {
+                            if (is_array($data) && (!isset($data['skip_installation']) || !$data['skip_installation'])) {
+                                $hasChanges = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    // Skip verification if no changes were made
+                    if (!$hasChanges) {
                         $this->updateSubStep(
                             'finalize',
                             'verify-installation',

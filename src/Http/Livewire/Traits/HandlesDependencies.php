@@ -330,6 +330,9 @@ trait HandlesDependencies
 
             switch ($subStep) {
                 case 'prepare-directory':
+                    // Prepare system before preparing directory
+                    $this->prepareSystemForInstallation();
+                    
                     $this->prepareDependencyDirectory($dependency, $modulePath);
                     break;
 
