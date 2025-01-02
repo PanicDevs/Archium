@@ -1,0 +1,16 @@
+{
+    "name": "archium",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "dev": "vite",
+        "build": "vite build"
+    },
+    "devDependencies": {
+        "autoprefixer": "^10.4.17",
+        "laravel-vite-plugin": "^1.1.1",
+        "postcss": "^8.4.33",
+        "tailwindcss": "^3.4.1",
+        "vite": "^6.0.0"
+    }
+}
