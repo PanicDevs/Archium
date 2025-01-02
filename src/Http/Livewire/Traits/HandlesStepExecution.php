@@ -301,6 +301,17 @@ trait HandlesStepExecution
         try {
             switch ($subStep) {
                 case 'enable-modules':
+                    // Skip enabling modules if installation was skipped
+                    if (isset($this->moduleData['skip_installation']) && $this->moduleData['skip_installation']) {
+                        $this->updateSubStep(
+                            'finalize',
+                            'enable-modules',
+                            'completed',
+                            'Module enabling skipped - No changes were made'
+                        );
+                        break;
+                    }
+
                     // Enable the main module first
                     $moduleKey = $this->moduleData['key'];
                     \Artisan::call('module:enable', ['module' => $moduleKey]);
@@ -333,44 +344,27 @@ trait HandlesStepExecution
                     break;
 
                 case 'verify-installation':
-                    // Check module statuses in modules_statuses.json
-                    $statusesFile = base_path('modules_statuses.json');
-                    if (!File::exists($statusesFile)) {
-                        throw new \Exception('modules_statuses.json not found');
+                    // Skip verification if installation was skipped
+                    if (isset($this->moduleData['skip_installation']) && $this->moduleData['skip_installation']) {
+                        $this->updateSubStep(
+                            'finalize',
+                            'verify-installation',
+                            'completed',
+                            'Verification skipped - No changes were made'
+                        );
+                        break;
                     }
 
-                    $statuses = json_decode(File::get($statusesFile), true);
-                    if (!$statuses) {
-                        throw new \Exception('Invalid modules_statuses.json file');
-                    }
-
-                    // Verify main module status using directory name
-                    $moduleKey = $this->moduleData['directory'];
-                    if (!isset($statuses[$moduleKey]) || !$statuses[$moduleKey]) {
-                        throw new \Exception("Main module {$moduleKey} is not enabled in modules_statuses.json");
-                    }
-
-                    // Verify dependencies statuses using their directory names
-                    if (!empty($this->moduleData['dependencies'])) {
-                        foreach ($this->moduleData['dependencies'] as $dependency => $data) {
-                            if (is_array($data) && (!isset($data['skip_installation']) || !$data['skip_installation'])) {
-                                // Get dependency data from XML
-                                $dependencyData = $this->getModuleData($dependency);
-                                $dependencyKey = $dependencyData['directory'];
-                                if (!isset($statuses[$dependencyKey]) || !$statuses[$dependencyKey]) {
-                                    throw new \Exception("Dependency {$dependencyKey} is not enabled in modules_statuses.json");
-                                }
-                            }
-                        }
-                    }
-
-                    // Clean up .git directories
-                    // For main module
-                    $mainModulePath = config('archium.modules_directory') . '/' . $this->moduleData['directory'];
-                    $mainGitPath = $mainModulePath . '/.git';
-                    if (File::exists($mainGitPath)) {
-                        File::deleteDirectory($mainGitPath);
-                        \Log::info("Removed .git directory from main module", ['path' => $mainGitPath]);
+                    // Get module data from XML
+                    $moduleData = $this->getModuleData($this->moduleData['key']);
+                    $modulePath = config('archium.modules_directory') . '/' . $moduleData['directory'];
+                    $gitPath = $modulePath . '/.git';
+                    if (File::exists($gitPath)) {
+                        File::deleteDirectory($gitPath);
+                        \Log::info("Removed .git directory from module", [
+                            'module' => $this->moduleData['key'],
+                            'path' => $gitPath
+                        ]);
                     }
 
                     // For dependencies
@@ -408,7 +402,8 @@ trait HandlesStepExecution
                             'directory' => $this->moduleData['directory'],
                             'version' => $this->moduleData['version'] ?? 'unknown',
                             'repository' => $this->moduleData['repository'] ?? 'unknown',
-                            'branch' => $this->moduleData['branch'] ?? 'unknown'
+                            'branch' => $this->moduleData['branch'] ?? 'unknown',
+                            'skipped' => isset($this->moduleData['skip_installation']) && $this->moduleData['skip_installation']
                         ],
                         'dependencies' => [],
                         'timeline' => []
@@ -417,43 +412,28 @@ trait HandlesStepExecution
                     // Add dependency information
                     if (!empty($this->moduleData['dependencies'])) {
                         foreach ($this->moduleData['dependencies'] as $dependency => $data) {
-                            if (is_array($data)) {
-                                $dependencyData = $this->getModuleData($dependency);
-                                $report['dependencies'][$dependency] = [
-                                    'directory' => $dependencyData['directory'],
-                                    'local_version' => $data['local_version'] ?? 'not installed',
-                                    'remote_version' => $data['remote_version'] ?? 'unknown',
-                                    'update_available' => $data['update_available'] ?? false,
-                                    'update_choice' => $data['update_choice'] ?? 'none',
-                                    'skipped' => $data['skip_installation'] ?? false,
-                                    'fresh_install' => $data['needs_fresh_install'] ?? false,
-                                    'repository' => $dependencyData['repository'] ?? 'unknown',
-                                    'branch' => $dependencyData['branch'] ?? 'unknown'
-                                ];
-                            }
+                            $dependencyData = $this->getModuleData($dependency);
+                            $report['dependencies'][$dependency] = [
+                                'directory' => $dependencyData['directory'],
+                                'version' => $data['version'] ?? 'unknown',
+                                'repository' => $dependencyData['repository'] ?? 'unknown',
+                                'branch' => $dependencyData['branch'] ?? 'unknown',
+                                'skipped' => isset($data['skip_installation']) && $data['skip_installation']
+                            ];
                         }
                     }
 
-                    // Process timeline from installation report
-                    foreach ($this->installationReport as $entry) {
-                        $timestamp = $entry['timestamp'];
-                        $timelineEntry = [
-                            'timestamp' => $timestamp->format('Y-m-d H:i:s'),
-                            'relative_time' => $timestamp->diffForHumans(),
+                    // Add timeline from installation report
+                    $report['timeline'] = array_map(function($entry) {
+                        return [
                             'step' => $entry['step'],
                             'sub_step' => $entry['sub_step'] ?? null,
                             'status' => $entry['status'],
                             'message' => $entry['message'] ?? null,
-                            'error' => $entry['error'] ?? null
+                            'error' => $entry['error'] ?? null,
+                            'timestamp' => $entry['timestamp']
                         ];
-
-                        // Add human-readable step title
-                        $timelineEntry['title'] = isset($entry['sub_step'])
-                            ? $this->getSubStepTitle($entry['step'], $entry['sub_step'])
-                            : $this->steps[$entry['step']]['title'];
-
-                        $report['timeline'][] = $timelineEntry;
-                    }
+                    }, $this->installationReport);
 
                     // Store the report in session for viewing
                     session(['installation_report' => $report]);

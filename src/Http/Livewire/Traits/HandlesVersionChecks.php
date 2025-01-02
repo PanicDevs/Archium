@@ -241,7 +241,7 @@ trait HandlesVersionChecks
     {
         return isset($this->moduleData['skip_installation']) && 
             $this->moduleData['skip_installation'] && 
-            in_array($step, ['clone-repository', 'finalize']);
+            $step === 'clone-repository';
     }
 
     /**
