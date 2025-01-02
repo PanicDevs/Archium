@@ -398,30 +398,41 @@ trait HandlesDependencies
     }
 
     /**
-     * Prepare the dependency directory for installation
+     * Prepare the dependency directory
      */
     private function prepareDependencyDirectory(string $dependency, string $modulePath): void
     {
-        // Get dependency data from XML
-        $dependencyData = $this->getModuleData($dependency);
-        $installPath = config('archium.modules_directory') . '/' . $dependencyData['directory'];
+        // Skip if user chose to keep current version
+        if (isset($this->moduleData['dependencies'][$dependency]['update_choice']) && 
+            $this->moduleData['dependencies'][$dependency]['update_choice'] === 'skip') {
+            $this->updateSubStep(
+                "clone-dependency-{$dependency}",
+                'prepare-directory',
+                'completed',
+                'Using existing dependency directory'
+            );
+            return;
+        }
 
-        if (File::exists($installPath)) {
-            // Create backup in the new location
-            $backupPath = $this->getDependencyBackupPath($dependency);
-            File::move($installPath, $backupPath);
+        if (File::exists($modulePath)) {
+            // Create backup
+            $backupPath = $this->getBackupPath($dependency);
+            File::move($modulePath, $backupPath);
+            if (!isset($this->moduleData['dependencies'][$dependency])) {
+                $this->moduleData['dependencies'][$dependency] = [];
+            }
             $this->moduleData['dependencies'][$dependency]['backup_path'] = $backupPath;
         }
 
-        // Clean up dependency and create fresh directory
-        $this->cleanupDependency($installPath, $dependencyData['directory']);
-        File::makeDirectory($installPath, 0755, true, true);
+        // Clean up and create fresh directory
+        $this->cleanupModule($modulePath, $dependency);
+        File::makeDirectory($modulePath, 0755, true, true);
 
         $this->updateSubStep(
             "clone-dependency-{$dependency}",
             'prepare-directory',
             'completed',
-            "Directory prepared for installation at {$installPath}"
+            'Directory prepared for installation'
         );
     }
 
@@ -430,6 +441,18 @@ trait HandlesDependencies
      */
     private function cloneDependencyRepository(string $dependency, string $modulePath): void
     {
+        // Skip if user chose to keep current version
+        if (isset($this->moduleData['dependencies'][$dependency]['update_choice']) && 
+            $this->moduleData['dependencies'][$dependency]['update_choice'] === 'skip') {
+            $this->updateSubStep(
+                "clone-dependency-{$dependency}",
+                'clone-repo',
+                'completed',
+                'Using existing dependency files'
+            );
+            return;
+        }
+
         // Get dependency data from XML
         $dependencyData = $this->getModuleData($dependency);
         $installPath = config('archium.modules_directory') . '/' . $dependencyData['directory'];
@@ -454,24 +477,32 @@ trait HandlesDependencies
     }
 
     /**
-     * Verify the cloned dependency files
+     * Verify the cloned dependency
      */
     private function verifyDependencyClone(string $dependency, string $modulePath): void
     {
-        // Get dependency data from XML
-        $dependencyData = $this->getModuleData($dependency);
-        $installPath = config('archium.modules_directory') . '/' . $dependencyData['directory'];
-
-        if (!File::exists($installPath . '/module.json')) {
-            throw new \Exception('module.json not found in cloned repository');
+        // Skip verification if user chose to keep current version
+        if (isset($this->moduleData['dependencies'][$dependency]['update_choice']) && 
+            $this->moduleData['dependencies'][$dependency]['update_choice'] === 'skip') {
+            $this->updateSubStep(
+                "clone-dependency-{$dependency}",
+                'verify-clone',
+                'completed',
+                'Using existing dependency files'
+            );
+            return;
         }
-        
+
+        if (!File::exists($modulePath . '/module.json')) {
+            throw new \Exception("module.json not found in cloned dependency: {$dependency}");
+        }
+
         // Clean up backup if exists and everything is successful
         if (isset($this->moduleData['dependencies'][$dependency]['backup_path']) && 
             File::exists($this->moduleData['dependencies'][$dependency]['backup_path'])) {
             File::deleteDirectory($this->moduleData['dependencies'][$dependency]['backup_path']);
         }
-        
+
         $this->updateSubStep(
             "clone-dependency-{$dependency}",
             'verify-clone',

@@ -95,6 +95,17 @@ trait HandlesRepositoryOperations
      */
     private function prepareModuleDirectory(string $modulePath): void
     {
+        // Skip if user chose to keep current version
+        if (isset($this->moduleData['update_choice']) && $this->moduleData['update_choice'] === 'skip') {
+            $this->updateSubStep(
+                'clone-repository',
+                'prepare-directory',
+                'completed',
+                'Using existing module directory'
+            );
+            return;
+        }
+
         $moduleKey = $this->moduleData['directory'];
 
         if (File::exists($modulePath)) {
@@ -121,6 +132,17 @@ trait HandlesRepositoryOperations
      */
     private function cloneModuleRepository(string $modulePath): void
     {
+        // Skip if user chose to keep current version
+        if (isset($this->moduleData['update_choice']) && $this->moduleData['update_choice'] === 'skip') {
+            $this->updateSubStep(
+                'clone-repository',
+                'clone-repo',
+                'completed',
+                'Using existing module files'
+            );
+            return;
+        }
+
         $repository = $this->moduleData['repository'];
         $branch = $this->moduleData['branch'];
         
@@ -145,6 +167,17 @@ trait HandlesRepositoryOperations
      */
     private function verifyClonedFiles(string $modulePath): void
     {
+        // Skip verification if user chose to keep current version
+        if (isset($this->moduleData['update_choice']) && $this->moduleData['update_choice'] === 'skip') {
+            $this->updateSubStep(
+                'clone-repository',
+                'verify-clone',
+                'completed',
+                'Using existing module files'
+            );
+            return;
+        }
+
         if (!File::exists($modulePath . '/module.json')) {
             throw new \Exception('module.json not found in cloned repository');
         }
