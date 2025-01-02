@@ -312,12 +312,12 @@ trait HandlesStepExecution
                         break;
                     }
 
-                    // Enable the main module first
-                    $moduleKey = $this->moduleData['key'];
-                    \Artisan::call('module:enable', ['module' => $moduleKey]);
+                    // Enable the main module first using directory name
+                    $moduleDirectory = $this->moduleData['directory'];
+                    \Artisan::call('module:enable', ['module' => $moduleDirectory]);
                     $output = \Artisan::output();
                     \Log::info('Main module enable command output', [
-                        'module' => $moduleKey,
+                        'module' => $moduleDirectory,
                         'output' => $output
                     ]);
 
@@ -325,10 +325,12 @@ trait HandlesStepExecution
                     if (!empty($this->moduleData['dependencies'])) {
                         foreach ($this->moduleData['dependencies'] as $dependency => $data) {
                             if (is_array($data) && (!isset($data['skip_installation']) || !$data['skip_installation'])) {
-                                \Artisan::call('module:enable', ['module' => $dependency]);
+                                // Get dependency data from XML
+                                $dependencyData = $this->getModuleData($dependency);
+                                \Artisan::call('module:enable', ['module' => $dependencyData['directory']]);
                                 $output = \Artisan::output();
                                 \Log::info('Dependency enable command output', [
-                                    'dependency' => $dependency,
+                                    'dependency' => $dependencyData['directory'],
                                     'output' => $output
                                 ]);
                             }
@@ -410,15 +412,15 @@ trait HandlesStepExecution
                     ];
 
                     // Add dependency information
-                    if (!empty($this->moduleData['dependencies'])) {
-                        foreach ($this->moduleData['dependencies'] as $dependency => $data) {
-                            $dependencyData = $this->getModuleData($dependency);
-                            $report['dependencies'][$dependency] = [
+                    if (!empty($this->moduleData['dependencies_data'])) {
+                        foreach ($this->moduleData['dependencies_data'] as $dependencyKey => $dependencyData) {
+                            $report['dependencies'][$dependencyKey] = [
                                 'directory' => $dependencyData['directory'],
-                                'version' => $data['version'] ?? 'unknown',
+                                'version' => $this->moduleData['dependencies'][$dependencyKey]['version'] ?? $dependencyData['version'] ?? 'unknown',
                                 'repository' => $dependencyData['repository'] ?? 'unknown',
                                 'branch' => $dependencyData['branch'] ?? 'unknown',
-                                'skipped' => isset($data['skip_installation']) && $data['skip_installation']
+                                'skipped' => isset($this->moduleData['dependencies'][$dependencyKey]['skip_installation']) && 
+                                           $this->moduleData['dependencies'][$dependencyKey]['skip_installation']
                             ];
                         }
                     }

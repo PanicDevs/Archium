@@ -324,7 +324,9 @@ trait HandlesDependencies
     protected function cloneDependencySubStep(string $dependency, string $subStep): void
     {
         try {
-            $modulePath = config('archium.modules_directory') . '/' . $dependency;
+            // Get dependency data from XML
+            $dependencyData = $this->getModuleData($dependency);
+            $modulePath = config('archium.modules_directory') . '/' . $dependencyData['directory'];
 
             switch ($subStep) {
                 case 'prepare-directory':
@@ -366,7 +368,8 @@ trait HandlesDependencies
         if (!File::exists($backupDir)) {
             File::makeDirectory($backupDir, 0755, true);
         }
-        return $backupDir . '/' . $dependency . '_' . time();
+        $dependencyData = $this->getModuleData($dependency);
+        return $backupDir . '/' . $dependencyData['directory'] . '_' . time();
     }
 
     /**
@@ -374,11 +377,15 @@ trait HandlesDependencies
      */
     private function cleanupDependency(string $dependencyPath, string $dependencyKey): void
     {
+        // Get dependency data from XML
+        $dependencyData = $this->getModuleData($dependencyKey);
+        $directory = $dependencyData['directory'];
+
         // Remove from modules_statuses.json
         $statusesFile = base_path('modules_statuses.json');
         if (File::exists($statusesFile)) {
             $statuses = json_decode(File::get($statusesFile), true) ?? [];
-            unset($statuses[$dependencyKey]);
+            unset($statuses[$directory]);
             File::put($statusesFile, json_encode($statuses, JSON_PRETTY_PRINT));
         }
 
@@ -414,9 +421,12 @@ trait HandlesDependencies
             return;
         }
 
+        // Get dependency data from XML
+        $dependencyData = $this->getModuleData($dependency);
+
         if (File::exists($modulePath)) {
             // Create backup
-            $backupPath = $this->getBackupPath($dependency);
+            $backupPath = $this->getDependencyBackupPath($dependency);
             File::move($modulePath, $backupPath);
             if (!isset($this->moduleData['dependencies'][$dependency])) {
                 $this->moduleData['dependencies'][$dependency] = [];
@@ -425,7 +435,7 @@ trait HandlesDependencies
         }
 
         // Clean up and create fresh directory
-        $this->cleanupModule($modulePath, $dependency);
+        $this->cleanupDependency($modulePath, $dependency);
         File::makeDirectory($modulePath, 0755, true, true);
 
         $this->updateSubStep(
@@ -455,13 +465,12 @@ trait HandlesDependencies
 
         // Get dependency data from XML
         $dependencyData = $this->getModuleData($dependency);
-        $installPath = config('archium.modules_directory') . '/' . $dependencyData['directory'];
 
         $repository = $dependencyData['repository'];
         $branch = $dependencyData['branch'];
 
         // Execute git clone command
-        $command = "git clone --branch {$branch} {$repository} {$installPath} 2>&1";
+        $command = "git clone --branch {$branch} {$repository} {$modulePath} 2>&1";
         exec($command, $output, $returnCode);
 
         if ($returnCode !== 0) {

@@ -6,7 +6,7 @@ use PanicDev\Archium\Support\ModuleParser;
 
 /**
  * Trait HandlesModuleData
- * 
+ *
  * This trait is responsible for loading and managing module data from XML configuration.
  * It handles the initial loading of module information and maintains the module's state
  * throughout the installation process.
@@ -37,7 +37,7 @@ trait HandlesModuleData
 
     /**
      * Load module data from the configured XML source
-     * 
+     *
      * @throws \Exception When XML URL is not configured or module is not found
      */
     protected function loadModule(): void
@@ -73,7 +73,7 @@ trait HandlesModuleData
                     $this->moduleData['dependencies_data'][$dependency] = $this->allModules[$dependency];
                 }
             }
-            
+
             // Log the module data structure for debugging
             \Log::debug('Module data loaded', [
                 'module_key' => $this->moduleKey,
@@ -91,10 +91,25 @@ trait HandlesModuleData
      */
     protected function getModuleData(string $moduleKey): array
     {
+        // Reload XML data if allModules is empty
+        if (empty($this->allModules)) {
+            $xmlUrl = config('archium.modules_xml_url');
+            $xmlContent = @file_get_contents($xmlUrl);
+            if ($xmlContent !== false) {
+                $this->allModules = ModuleParser::parse($xmlContent);
+            }
+        }
+
+        // First check in all modules
+        if (isset($this->allModules[$moduleKey])) {
+            return $this->allModules[$moduleKey];
+        }
+
+        // Then check in dependencies data
         if (isset($this->moduleData['dependencies_data'][$moduleKey])) {
             return $this->moduleData['dependencies_data'][$moduleKey];
         }
 
         throw new \Exception("Module not found: {$moduleKey}");
     }
-} 
+}
