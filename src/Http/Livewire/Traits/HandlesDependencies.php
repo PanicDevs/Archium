@@ -358,6 +358,46 @@ trait HandlesDependencies
     }
 
     /**
+     * Get the backup directory path for a dependency
+     */
+    private function getDependencyBackupPath(string $dependency): string
+    {
+        $backupDir = storage_path('app/Archium/Backups/' . date('Y-m-d'));
+        if (!File::exists($backupDir)) {
+            File::makeDirectory($backupDir, 0755, true);
+        }
+        return $backupDir . '/' . $dependency . '_' . time();
+    }
+
+    /**
+     * Clean up dependency installation
+     */
+    private function cleanupDependency(string $dependencyPath, string $dependencyKey): void
+    {
+        // Remove from modules_statuses.json
+        $statusesFile = base_path('modules_statuses.json');
+        if (File::exists($statusesFile)) {
+            $statuses = json_decode(File::get($statusesFile), true) ?? [];
+            unset($statuses[$dependencyKey]);
+            File::put($statusesFile, json_encode($statuses, JSON_PRETTY_PRINT));
+        }
+
+        // Clean bootstrap cache
+        $cacheFiles = ['modules.php', 'packages.php', 'services.php'];
+        foreach ($cacheFiles as $file) {
+            $cachePath = base_path('bootstrap/cache/' . $file);
+            if (File::exists($cachePath)) {
+                File::delete($cachePath);
+            }
+        }
+
+        // Remove dependency directory if exists
+        if (File::exists($dependencyPath)) {
+            File::deleteDirectory($dependencyPath);
+        }
+    }
+
+    /**
      * Prepare the dependency directory for installation
      */
     private function prepareDependencyDirectory(string $dependency, string $modulePath): void
@@ -367,15 +407,16 @@ trait HandlesDependencies
         $installPath = config('archium.modules_directory') . '/' . $dependencyData['directory'];
 
         if (File::exists($installPath)) {
-            // Backup existing directory if it exists
-            $backupPath = $installPath . '_backup_' . time();
+            // Create backup in the new location
+            $backupPath = $this->getDependencyBackupPath($dependency);
             File::move($installPath, $backupPath);
             $this->moduleData['dependencies'][$dependency]['backup_path'] = $backupPath;
         }
-        
-        // Create fresh directory
+
+        // Clean up dependency and create fresh directory
+        $this->cleanupDependency($installPath, $dependencyData['directory']);
         File::makeDirectory($installPath, 0755, true, true);
-        
+
         $this->updateSubStep(
             "clone-dependency-{$dependency}",
             'prepare-directory',

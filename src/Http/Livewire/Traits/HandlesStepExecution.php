@@ -402,11 +402,72 @@ trait HandlesStepExecution
 
                 case 'generate-report':
                     // Generate the final installation report
+                    $report = [
+                        'module' => [
+                            'key' => $this->moduleData['key'],
+                            'directory' => $this->moduleData['directory'],
+                            'version' => $this->moduleData['version'] ?? 'unknown',
+                            'repository' => $this->moduleData['repository'] ?? 'unknown',
+                            'branch' => $this->moduleData['branch'] ?? 'unknown'
+                        ],
+                        'dependencies' => [],
+                        'timeline' => []
+                    ];
+
+                    // Add dependency information
+                    if (!empty($this->moduleData['dependencies'])) {
+                        foreach ($this->moduleData['dependencies'] as $dependency => $data) {
+                            if (is_array($data)) {
+                                $dependencyData = $this->getModuleData($dependency);
+                                $report['dependencies'][$dependency] = [
+                                    'directory' => $dependencyData['directory'],
+                                    'local_version' => $data['local_version'] ?? 'not installed',
+                                    'remote_version' => $data['remote_version'] ?? 'unknown',
+                                    'update_available' => $data['update_available'] ?? false,
+                                    'update_choice' => $data['update_choice'] ?? 'none',
+                                    'skipped' => $data['skip_installation'] ?? false,
+                                    'fresh_install' => $data['needs_fresh_install'] ?? false,
+                                    'repository' => $dependencyData['repository'] ?? 'unknown',
+                                    'branch' => $dependencyData['branch'] ?? 'unknown'
+                                ];
+                            }
+                        }
+                    }
+
+                    // Process timeline from installation report
+                    foreach ($this->installationReport as $entry) {
+                        $timestamp = $entry['timestamp'];
+                        $timelineEntry = [
+                            'timestamp' => $timestamp->format('Y-m-d H:i:s'),
+                            'relative_time' => $timestamp->diffForHumans(),
+                            'step' => $entry['step'],
+                            'sub_step' => $entry['sub_step'] ?? null,
+                            'status' => $entry['status'],
+                            'message' => $entry['message'] ?? null,
+                            'error' => $entry['error'] ?? null
+                        ];
+
+                        // Add human-readable step title
+                        $timelineEntry['title'] = isset($entry['sub_step'])
+                            ? $this->getSubStepTitle($entry['step'], $entry['sub_step'])
+                            : $this->steps[$entry['step']]['title'];
+
+                        $report['timeline'][] = $timelineEntry;
+                    }
+
+                    // Store the report in session for viewing
+                    session(['installation_report' => $report]);
+
+                    \Log::info('Dispatching installation report', ['report' => $report]);
+                    
+                    // Emit event to show the report modal
+                    $this->dispatch('show-installation-report', ['report' => $report]);
+
                     $this->updateSubStep(
                         'finalize',
                         'generate-report',
                         'completed',
-                        'Installation report generated'
+                        'Installation report generated successfully'
                     );
                     break;
 
@@ -417,5 +478,18 @@ trait HandlesStepExecution
             $this->updateSubStep('finalize', $subStep, 'failed', null, $e->getMessage());
             throw $e;
         }
+    }
+
+    /**
+     * Get the human-readable title for a sub-step
+     */
+    private function getSubStepTitle(string $step, string $subStep): string
+    {
+        foreach ($this->steps[$step]['sub_steps'] as $sub) {
+            if ($sub['key'] === $subStep) {
+                return $sub['title'];
+            }
+        }
+        return $subStep; // Fallback to key if title not found
     }
 }

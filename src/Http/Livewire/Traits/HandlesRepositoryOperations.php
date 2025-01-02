@@ -51,20 +51,63 @@ trait HandlesRepositoryOperations
     }
 
     /**
+     * Get the backup directory path
+     */
+    private function getBackupPath(string $moduleKey): string
+    {
+        $backupDir = storage_path('app/Archium/Backups/' . date('Y-m-d'));
+        if (!File::exists($backupDir)) {
+            File::makeDirectory($backupDir, 0755, true);
+        }
+        return $backupDir . '/' . $moduleKey . '_' . time();
+    }
+
+    /**
+     * Clean up module installation
+     */
+    private function cleanupModule(string $modulePath, string $moduleKey): void
+    {
+        // Remove from modules_statuses.json
+        $statusesFile = base_path('modules_statuses.json');
+        if (File::exists($statusesFile)) {
+            $statuses = json_decode(File::get($statusesFile), true) ?? [];
+            unset($statuses[$moduleKey]);
+            File::put($statusesFile, json_encode($statuses, JSON_PRETTY_PRINT));
+        }
+
+        // Clean bootstrap cache
+        $cacheFiles = ['modules.php', 'packages.php', 'services.php'];
+        foreach ($cacheFiles as $file) {
+            $cachePath = base_path('bootstrap/cache/' . $file);
+            if (File::exists($cachePath)) {
+                File::delete($cachePath);
+            }
+        }
+
+        // Remove module directory if exists
+        if (File::exists($modulePath)) {
+            File::deleteDirectory($modulePath);
+        }
+    }
+
+    /**
      * Prepare the module directory for installation
      */
     private function prepareModuleDirectory(string $modulePath): void
     {
+        $moduleKey = $this->moduleData['directory'];
+
         if (File::exists($modulePath)) {
-            // Backup existing directory if it exists
-            $backupPath = $modulePath . '_backup_' . time();
+            // Create backup in the new location
+            $backupPath = $this->getBackupPath($moduleKey);
             File::move($modulePath, $backupPath);
             $this->moduleData['backup_path'] = $backupPath;
         }
-        
-        // Create fresh directory
+
+        // Clean up module and create fresh directory
+        $this->cleanupModule($modulePath, $moduleKey);
         File::makeDirectory($modulePath, 0755, true, true);
-        
+
         $this->updateSubStep(
             'clone-repository',
             'prepare-directory',
