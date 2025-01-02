@@ -37,7 +37,7 @@
                         {{ $subStep['title'] }}
                     </p>
                 </div>
-                
+
                 @if($currentStep === $key && $subStep['status'] === 'pending')
                     <div class="mt-2">
                         <p class="text-sm text-gray-500 dark:text-gray-400">
@@ -54,7 +54,7 @@
                                                 type="button"
                                                 @class([
                                                     'inline-flex items-center px-2.5 py-1.5 text-xs font-medium rounded transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed',
-                                                    'text-white bg-primary-600 hover:bg-primary-500 dark:bg-primary-500 dark:hover:bg-primary-400' => $value === 'update',
+                                                    'text-white bg-primary-600 hover:bg-primary-500 dark:bg-primary-500 dark:hover:bg-primary-400' => $value != 'skip',
                                                     'text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 dark:text-gray-300 dark:bg-gray-800 dark:border-gray-600 dark:hover:bg-gray-700' => $value === 'skip'
                                                 ])
                                             >
@@ -117,4 +117,4 @@
             </div>
         </div>
     @endforeach
-</div> 
+</div>
